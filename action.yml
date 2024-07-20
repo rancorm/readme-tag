@@ -1,0 +1,69 @@
+#
+# README Tag Action
+#
+# Tags an Azure Resource Group with the README URL of the repository.
+#
+#
+name: "README Tag"
+description: "Tag an Resource Group with the README URL"
+
+inputs:
+  resource-group-name:
+    description: "Name of the Resource Group"
+    required: true
+  branch:
+    description: "Branch to check"
+    required: true
+    default: "main"
+  check-file:
+    description: "File to check"
+    required: true
+    default: "README.md"
+
+outputs:
+  readmeUrl:
+    description: "README URL"
+    value: ${{ steps.readme.outputs.url }}
+
+runs:
+    using: "composite"
+    steps:
+      - name: Set environment variables
+        shell: bash
+        run: |
+          echo "REPO_URL=https://github.com/${{ github.repository }}.git" >> $GITHUB_ENV
+          echo "BRANCH=${{ inputs.branch }}" >> $GITHUB_ENV
+          echo "CHECK_FILE=${{ inputs.check-file }}" >> $GITHUB_ENV
+
+      - name: Checkout README
+        shell: bash
+        run: |
+          git init
+          git remote add origin ${{ env.REPO_URL }}
+          git fetch --depth=1 origin ${{ env.BRANCH }}
+          git checkout origin/${{ env.BRANCH }} ${{ env.CHECK_FILE }} || echo "No ${{ env.CHECK_FILE }} found"
+
+      - name: Check for README
+        id: readme
+        shell: bash
+        run: |
+          if [ -f ${{ env.CHECK_FILE }} ]; then
+            README_URL=${{ env.REPO_URL }}/blob/${{ env.BRANCH }}/${{ env.CHECK_FILE }}
+            
+            echo "::set-output name=url::${README_URL}"
+          else
+            echo "::set-output name=url::"
+          fi
+
+      - name: Azure login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Tag resource group
+        shell: bash
+        if: steps.readme.outputs.url != ''
+        run: |
+          az group update --name ${{ github.event.inputs.resource-group-name }} --set tags.readme=${{ steps.readme.outputs.url }}
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
